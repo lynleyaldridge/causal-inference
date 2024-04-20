@@ -1,0 +1,17 @@
+---
+title: "causal inference crib notes"
+---
+
+# Introduction
+
+This document consolidates my learning about techniques for casual inference in education in a single document, and includes a list of resources for further reading.
+
+# References
+
+Marcelo Coca Perraillon, University of Colorado Denver
+
+[Health Services Research Methods I](https://clas.ucdenver.edu/marcelo-perraillon/sites/default/files/attached-files/week_3_causal_0.pdf)
+
+<https://clas.ucdenver.edu/marcelo-perraillon/sites/default/files/attached-files/w2_causal_inference_perraillon.pdf>
+
+<https://clas.ucdenver.edu/marcelo-perraillon/sites/default/files/attached-files/week_3_causal_0.pdf>
