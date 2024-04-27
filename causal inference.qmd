@@ -1,17 +1,809 @@
 ---
-title: "causal inference crib notes"
+title: "Causal inference crib notes"
+bibliography: causal inference.bib
+csl: nature.csl
+
+format:
+  html:
+    code-fold: true
+    toc: true
+
+warning: false
 ---
+
+# Setup
+
+```{r library}
+
+if (!require("pacman")) install.packages("pacman")
+
+pacman::p_load(tidyverse,
+               here,
+               haven, # for reading Stata .dta files
+               sjPlot, # for viewing codebook and summarizing regression models
+               srvyr, # for survey weighting and setup: can use with tidyverse
+               survey, # for regression with survey data
+               estimatr, # for regressions
+               broom, # alternative for regressions
+               modelsummary, # alternative for viewing model summaries
+               MatchIt, # implements matching approaches
+               kableExtra, # alternative to gt for tables
+               gt) 
+
+# remotes::install_github("datalorax/equatiomatic") 
+# for printing of regression equations
+
+library(equatiomatic)
+
+```
 
 # Introduction
 
 This document consolidates my learning about techniques for casual inference in education in a single document, and includes a list of resources for further reading.
 
-# References
+# Summary table
 
-Marcelo Coca Perraillon, University of Colorado Denver
++-----------------------------------+-----------------------------------------------------------------------------------------------------------------------------+-------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------+-----------+
+| Method                            | When to use?                                                                                                                | Assumptions                                                                         | Examples                                                                                                   | xx        |
++===================================+=============================================================================================================================+=====================================================================================+============================================================================================================+===========+
+| Randomized controlled experiment  | We can randomly sample and assign individuals to treatment and control groups.                                              |                                                                                     |                                                                                                            |           |
+|                                   |                                                                                                                             |                                                                                     |                                                                                                            |           |
+|                                   | There are explicit program assignment rules.                                                                                |                                                                                     |                                                                                                            |           |
++-----------------------------------+-----------------------------------------------------------------------------------------------------------------------------+-------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------+-----------+
+| Difference-in-differences         | Something "naturally" separates individuals into a treatment and control group - not separated based on a numerical cutoff. | Parallel trends                                                                     | Spread of cholera in London between 1849 and 1854 [@huntington-klein_effect_2021; @cunningham_causal_2021] |           |
+|                                   |                                                                                                                             |                                                                                     |                                                                                                            |           |
+|                                   | Program assignment rules are not clear.                                                                                     | There is no factor disproportionately impacting only one group at time of treatment | CESE's Connected Communities Strategy evaluation (with propensity score matching?)                         |           |
++-----------------------------------+-----------------------------------------------------------------------------------------------------------------------------+-------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------+-----------+
+| Regression discontinuity          | Something "naturally" separates individuals into a treatment and control group - separated based on some numerical cutoff.  |                                                                                     |                                                                                                            |           |
+|                                   |                                                                                                                             |                                                                                     |                                                                                                            |           |
+|                                   | There are explicit program assignment rules.                                                                                |                                                                                     |                                                                                                            |           |
++-----------------------------------+-----------------------------------------------------------------------------------------------------------------------------+-------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------+-----------+
+| Instrumental variables estimation | We have a background variable (not correlated by outcome) that can be used to predict participation                         |                                                                                     |                                                                                                            |           |
++-----------------------------------+-----------------------------------------------------------------------------------------------------------------------------+-------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------+-----------+
+| Matching                          | We have data that can be used to match individuals in treatment and control conditions.                                     | No unobserved variables impacting program participation and outcomes                | Mosquito nets and malaria risk (simulated data) [@heiss_program_nodate]                                    |           |
+|                                   |                                                                                                                             |                                                                                     |                                                                                                            |           |
+|                                   | Program assignment rules are not clear.                                                                                     |                                                                                     | National Supported Work Demonstration (NSW) job-training program [@cunningham_causal_2021]                 |           |
+|                                   |                                                                                                                             |                                                                                     |                                                                                                            |           |
+|                                   |                                                                                                                             |                                                                                     | Black politicians and response to out-of-area inquiries [@huntington-klein_effect_2021]                    |           |
+|                                   |                                                                                                                             |                                                                                     |                                                                                                            |           |
+|                                   |                                                                                                                             |                                                                                     | Public vs. Catholic math achievement [@murnane_methods_2010; @ejdemyr_r_nodate]                            |           |
+|                                   |                                                                                                                             |                                                                                     |                                                                                                            |           |
+|                                   |                                                                                                                             |                                                                                     | Schools to watch [@randolph_step-by-step_nodate]                                                           |           |
+|                                   |                                                                                                                             |                                                                                     |                                                                                                            |           |
+|                                   |                                                                                                                             |                                                                                     | CESE's COVID-ILSP Evaluation (Phase 3)                                                                     |           |
+|                                   |                                                                                                                             |                                                                                     |                                                                                                            |           |
+|                                   |                                                                                                                             |                                                                                     | CESE's 'Why aren't students studying higher level maths' (contrasted with DiD)                             |           |
++-----------------------------------+-----------------------------------------------------------------------------------------------------------------------------+-------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------+-----------+
 
-[Health Services Research Methods I](https://clas.ucdenver.edu/marcelo-perraillon/sites/default/files/attached-files/week_3_causal_0.pdf)
+Modified from : <https://bookdown.org/aschmi11/causal_inf/> (p. 1)
+
+# Regression recap
+
+Look at 'Statistical Inference'
+
+# HISP Case Study
+
+The case study presented in 'Impact Evaluation in Practice' relates to an evaluation of a health insurance subsidy program (HISP), intended to reduce out-of-pocket health-care costs for low-income households.
+
+Data for this fictional case-study can be downloaded from the World Bank's [Open Knowledge Repository](https://openknowledge.worldbank.org/entities/publication/ebbe3565-69ff-5fe2-b65d-11329cf45293). Select 'Additional Material' to download the zip folder 'Impact evaluation in practice'. I saved the entire contents of this folder to the 'iep' subfolder of the 'data' folder within this project.
+
+R code by Liam Beiser-McGrath can be downloaded from [Impact Evalutaion in Practice: Solutions for Second Edition in R](https://lfbeisermcgrath.github.io/rimpactevaluation/). Note that I also downloaded the file [\`variable_desc.csv'](https://github.com/lfbeisermcgrath/rimpactevaluation/blob/master/data/variable_desc.csv) from the github associated with this book
+
+## Introducing the HISP evaluation dataset
+
+```{r}
+HISP <- haven::read_dta(here("data", "iep", "evaluation.dta"))
+
+sjPlot::view_df(HISP, show.type = TRUE, show.frq = TRUE, show.prc = TRUE)
+```
+
+# Difference-in-differences
+
+::: callout-note
+## Resources on difference-in-differences
+
+For overviews and worked examples of the difference-in-differences approach, see:
+
+Chapter 7, [Impact evaluation in practice](https://www.worldbank.org/en/programs/sief-trust-fund/publication/impact-evaluation-in-practice) (Paul Gertler et al, 2016)
+
+Chapter 8, Methods Matter (Murnane & Willett, 2010)
+
+Chapter 4, [Causal inference in education](https://bookdown.org/aschmi11/causal_inf/) (Anthony Schmidt, 2020)
+
+Weeks 8 and 9, [Andrew Heiss's Program Evaluation module](https://evalsp24.classes.andrewheiss.com/content/08-content.html)
+
+Chapter 18, [The Effect](https://theeffectbook.net/) (Nick Huntington-Klein, 2021)
+
+Chapter 9, [Causal inference: The Mixtape](https://mixtape.scunning.com/) (Scott Cunningham, 2021)
+:::
+
+## Overview
+
+The difference-in-differences approach compares *changes* in outcomes over time between a population receiving treatment and a population not receiving treatment [@gertler_impact_2016]. This removes the time-varying differences assumed to be constant between groups and cancels out the effect of *observed* and *unobserved* time-invariant characteristics of individuals.
+
+Difference-in-differences approaches assume *parallel trends* between the treatment and control group: "treatment and control groups evolve similarly in the absence of treatment, even if from different starting points" [@marginal_revolution_university_introduction_2021].
+
+We can test this by:
+
+-   comparing repeatedly before implementation
+
+-   including a fake treatment group, for whom we expect to find zero impact (e.g., grade level not exposed to the treatment, nor being used as comparison group)
+
+-   calculating estimates for a fake outcome, for which we expect to find zero impact (e.g., number of siblings)
+
+-   using multiple comparison groups (for whom estimated impact should be approximately the same)
+
+-   [@gertler_impact_2016]
+
+I have a bumper sticker on my car that says “I love Federalism (for the natural experiments)” [@cunningham_causal_2021]
+
+## Differences-in-differences for the HISP case study
+
+### Two way comparison of means
+
+@tbl-comparison-means-HISP presents mean household health expenditures (in dollars) for enrolled and nonenrolled households, before and after the introduction of HISP.
+
+```{r}
+#| label: tbl-comparison-means-HISP
+#| tbl-cap: "Evaluating HISP: Difference-in-differences comparison of means [Table 7.2 in Gertler et al. (2016)]"
+
+HISP %>%
+  filter(treatment_locality == 1) %>%
+  mutate(round = case_when(round == 0 ~ "after",
+                           round == 1 ~ "before"),
+         enrolled = case_when(enrolled == 0 ~ "Nonenrolled",
+                              enrolled == 1 ~ "Enrolled")) %>%
+  group_by(enrolled, round) %>%
+  summarize(average = mean(health_expenditures)) %>%
+  pivot_wider(names_from = round,
+              values_from = average) %>%
+  ungroup() %>%
+  mutate(difference = as.character(round(before - after, 2))) %>%
+  add_row(enrolled = "Difference",
+          after = -6.30,
+          before = -14.46,
+          difference = "DD = -6.65 - 1.51 = -8.16 <br> DD = -6.30 - -14.46 = -8.16") %>%
+  gt(rowname_col = "enrolled") %>%
+  cols_label(after = "After (follow-up)",
+             before = "Before (baseline)",
+             difference = "Difference") %>%
+  cols_align(align = "right",
+             columns = difference) %>%
+  fmt_number(decimals = 2) %>%
+  sub_missing(missing_text = "") %>%
+  fmt_markdown(columns= difference)
+```
+
+### Regression models
+
+```{r}
+# Note that Liam's code uses estimatr::lm_robust (to generate clustered standard errors, which appears necessary with clustered data), which we continue to do below, but equatiomatic can't be used with object of class lm_robust
+
+# <https://evalf21.classes.andrewheiss.com/example/standard-errors/>
+
+out_did <- estimatr::lm_robust(health_expenditures ~ 
+                                 round * enrolled,
+                     data = HISP %>% filter(
+                       treatment_locality == 1),
+                     clusters = locality_identifier)
+
+out_did_wcov <- estimatr::lm_robust(health_expenditures ~
+                            round * enrolled + age_hh + age_sp + educ_hh + educ_sp + female_hh + indigenous + hhsize + dirtfloor + bathroom + land + hospital_distance,
+                          data = HISP %>% filter(
+                       treatment_locality == 1),
+                     clusters = locality_identifier
+                          )
+```
+
+### Regression output
+
+In @tbl-comparison-models-HISP, we use [sjPlot::tab_model](https://cran.r-project.org/web/packages/sjPlot/vignettes/tab_model_estimates.html) to summarize the outputs of both regressions, side-by-side. Note that sjPlot works well with labelled data (i.e., we started with a stata data file with variable labels assigned, and imported this using haven::read_dta). Also note that html is the only output format (not PDF).
+
+```{r}
+#| label: tbl-comparison-models-HISP
+#| tbl-cap: "Test"
+
+
+sjPlot::tab_model(out_did, out_did_wcov,
+                  show.intercept = TRUE,
+                  terms = c("(Intercept)",
+                            "enrolled",
+                            "round",
+                            "round:enrolled"))
+  
+```
+
+From this, we could tentatively conclude:
+
+-   Being enrolled in the program was associated with a \$6.3 decrease in health expenditures (\$1.51 when adjusted for covariates)"
+
+-   Health expenditures at follow-up were \$1.51 increased from baseline (\$1.45 when adjusted for coveriates)
+
+-   The program reduced health expenditures for those enrolled by \$8.16
+
+This assumes, however:
+
+-   Groups would have evolved similarly in the absence of treatment (even if starting points were different)
+
+-   There were no other factors that disproportionately impacted only one group at the time of treatment
+
+### Regression equations
+
+The first model is of the form shown in @eq-out-did
+
+$$
+health expenditure = 20.79 + 1.51 \times round - 6.30 \times enrolled - 8.16 \times round:enrolled
+$$ {#eq-out-did}
+
+The second model is of the form shown in @eq-out-did-wcov
+
+$$
+health expenditure = 27.39 + 1.45 \times round - 1.51 \times enrolled - 8.16 \times round:enrolled (and a string of adjustments for covariates)
+$$ {#eq-out-did-wcov}
+
+## Differences-in-differences for impact of Social Security Survivor Benefits on college attendance
+
+Murnane and Willett (2010) [@murnane_methods_2010] provide a case study looking at college attendance before and after 1981, when financial aid for college stopped being provided to children of deceased fathers. (See @dynarski_does_2003 for original analysis.)
+
+Data for case studies in this book can be downloaded from UCLA's [Statistical Methods and Data Analytics](https://stats.oarc.ucla.edu/other/examples/methods-matter/) website. I saved the entire contents of this folder to the 'methods_matter' subfolder of the 'data' folder within this project.
+
+See also: <https://stats.oarc.ucla.edu/stata/examples/methods-matter/chapter8/>
+
+### Introducing the social security survivor benefits dataset
+
+```{r}
+sssb <- haven::read_dta(here("data", "methods_matter", "ch8_dynarski.dta")) %>%
+  mutate(fatherdec = as_factor(fatherdec))
+
+sjPlot::view_df(sssb, show.type = TRUE, show.frq = TRUE, show.prc = TRUE)
+```
+
+### Survey set up and weighting
+
+```{r}
+# survey set up and weighting
+
+srvy_data <- sssb %>% srvyr::as_survey_design(ids = hhid, 
+                              weights = wt88)
+```
+
+### Two way comparison of means
+
+@tbl-comparison-means-SSSB presents mean college enrollments by the age of 23, for those receiving or not receiving social security benefits, before and after changes to eligibility for offers of support. (Note that receipt of social security benefits was determined based on whether young people's fathrs had died before their 18th birthday.)
+
+```{r}
+#| label: tbl-comparison-means-SSSB
+#| tbl-cap: "Evaluating SSSB: Difference-in-differences comparison of means"
+
+srvy_data %>%
+  mutate(offer = case_when(offer == 0 ~ "no",
+                           offer == 1 ~ "yes")) %>%
+  group_by(offer, fatherdec) %>%
+  srvyr::summarize(average = srvyr::survey_mean(coll)) %>%
+  select(-(average_se)) %>%
+  pivot_wider(names_from = offer,
+              values_from = average) %>%
+  ungroup() %>%
+  arrange(desc(fatherdec)) %>%
+  select(fatherdec, yes, no) %>%
+  mutate(difference = as.character(round(yes - no, 2))) %>%
+  add_row(fatherdec = "Difference",
+          yes = 0.06,
+          no = -0.13,
+          difference = "DD = .21 - .03 = .18 <br> DD = .06 - -.13 = .19") %>%
+  gt(rowname_col = "fatherdec") %>%
+  cols_label(no = "SSSB support not available",
+             yes = "SSSB support available",
+             difference = "Difference") %>%
+  cols_align(align = "right",
+             columns = difference) %>%
+  fmt_number(decimals = 2) %>%
+  sub_missing(missing_text = "") %>%
+  fmt_markdown(columns= difference)
+```
+
+### Regression models
+
+```{r}
+srvy_did <- survey::svyglm(coll ~ offer + fatherdec + offer*fatherdec,
+                   family = gaussian(),
+                   data = srvy_data,
+                   design = srvy_data)
+```
+
+### Regression output
+
+```{r}
+sjPlot::tab_model(srvy_did)
+
+```
+
+The interaction term *offer x father deceased* is the difference-in-differences estimate, indicating that for those eligible for support (i.e., those with deceased fathers), enrollment percentages were 18 percentage points higher during the period in which support was provided than afterwards.
+
+### Regression equation
+
+Testing label for @eq-srvy-did
+
+```{r}
+#| label: eq-srvy-did
+
+equatiomatic::extract_eq(srvy_did, use_coefs = TRUE)
+```
+
+# Matching
+
+::: callout-note
+## Resources on matching
+
+For overviews and worked examples of matching approaches, see:
+
+Chapter 8, [Impact evaluation in practice](https://www.worldbank.org/en/programs/sief-trust-fund/publication/impact-evaluation-in-practice) (Paul Gertler et al, 2016)
+
+Chapter 7, [Causal inference in education](https://bookdown.org/aschmi11/causal_inf/) (Anthony Schmidt, 2020)
+
+Week 7, [Andrew Heiss's Program Evaluation module](https://evalsp24.classes.andrewheiss.com/content/07-content.html) - and [worked example of Matching and IPW](https://evalsp24.classes.andrewheiss.com/example/matching-ipw.html)
+
+Chapter 13, [The Effect](https://theeffectbook.net/) (Nick Huntington-Klein, 2021)
+
+Chapter 5, [Causal inference: The Mixtape](https://mixtape.scunning.com/) (Scott Cunningham, 2021)
+
+Chapter 12, Methods Matter (Murnane & Willett, 2010)
+:::
+
+## Warning
+
+Note Gary King and Richard Nielsen[@king_why_2019; @methods_colloquium_gary_2015] talk about how we shouldn't use propensity scores for *matching for identification purposes* (i.e., when trying to isolate the relationship between x and y, and remove the confounding). [See also @andrew_heiss_pmap_2020; @huntington-klein_effect_2021]. Note that they are fine to use in other contexts (e.g., for inverse probability weighting), but consider reworking the examples below with nearest neighbor or Mahalanobus distance.
+
+## Overview
+
+Matching approaches to causal inference calculate the estimated impact of a program by comparing the average difference in outcomes between those receiving the treatment and a statistically matched group of controls. [@gertler_impact_2016].
+
+*A lack of common support* refers to the situation where the distributions of variables used to match treatment and control observations do not sufficiently overlap. [@gertler_impact_2016; @huntington-klein_effect_2021]. In this situation, we might restrict the sample and estimate the *Local Average Treatment Effect* "for observations with common support in the distribution of propensity scores.
+
+Only (1) observed characteristics (2) measured at baseline can be used for matching, and (3) results are limited by the characteristics used for matching. It is most important to match on the basis of characteristics that impact whether units receive treatment or not.
+
+Note also that if baseline data on outcomes are available, the matching method should be combined with difference-in-differences. This further reduces bias by accounting for any time-invariant unobserved characteristics. In this case:
+
+1)  match on observed baseline characteristics
+2)  calculate individual changes in outcomes before and after treatment for treated group
+3)  calculate individual changes in outcomes over time for matched comparison units
+4)  subtract 3) from 2)
+5)  average the double differences
+
+### Propensity score matching
+
+Propensity score matching computes the probability of enrollment in the program at baseline (based on observed characteristics) of those receiving and not receiving treatment, and matches units in the treatment group with non-treated units whose propensity scores are the closest [@gertler_impact_2016].
+
+## Propensity score matching for the HISP case study
+
+### Convert dataset to wide format
+
+```{r}
+HISP_wide <- HISP %>%
+  pivot_wider(names_from = round,
+              values_from = c(health_expenditures,
+                              poverty_index,
+                              age_hh,
+                              age_sp,
+                              educ_hh,
+                              educ_sp,
+                              female_hh,
+                              indigenous,
+                              hhsize,
+                              dirtfloor,
+                              bathroom,
+                              land,
+                              hospital_distance,
+                              hospital)) %>%
+  
+  # remove household with missing values for health expenciture at baseline
+  filter(!is.na(health_expenditures_0))
+```
+
+### Estimate propensity scores and find matches with the matchit function
+
+```{r}
+# estimate propensity scores using only age_hh and educ_hh at baseline
+# psm_r = propensity score matches using restricted model
+psm_r <- matchit(enrolled ~ age_hh_0 + educ_hh_0,
+                 data = HISP_wide %>%
+                   dplyr::select(-hospital_0, -hospital_1),
+                 distance = "glm", link = "probit")
+
+psm_ur <- matchit(enrolled ~ age_hh_0 + educ_hh_0 + age_sp_0 + educ_sp_0 +
+                    female_hh_0 + indigenous_0 + hhsize_0 + dirtfloor_0 +
+                    bathroom_0 + land_0 + hospital_distance_0,
+                 data = HISP_wide %>% 
+                   dplyr::select(-hospital_0, -hospital_1), 
+                 distance = "glm", link = "probit")
+
+```
+
+### Summarize estimates of propensity scores based on baseline observed characteristics
+
+@tbl-propensity-score-estimates-HISP presents two models for calculating propensity scores, one with a limited set of explanatory variables and one with a full set. This table suggests households are less likely to be involved in the program if the head of the household is older, more educated, or female. Households with a bathroom, or owning larger amounts of land are also less likely to be enrolled. Households are more likely to be enrolled if they are indigenous, larger, have a dirt floor, or are located further from the hospital. This suggests the program has been successful in enrolling target poorer households.
+
+```{r}
+#| label: tbl-propensity-score-estimates-HISP
+#| tbl-cap: "Estimating the propensity score based on baseline observed characteristics [Table 8.1 in Gertler et al. (2016)]"
+
+sjPlot::tab_model(psm_r$model, psm_ur$model,
+                  transform = NULL,
+                  dv.labels = c("Limited set of explanatory variables", 
+                                "Full set of explanatory variables"),
+                  digits = 3)
+```
+
+Note: Probit regression. The dependent variable is 1 if the household enrolled in HISP, and 0 otherwise. The coefficients represent the contribution of each listed explanatory variable to the probability that a household enrolled in HISP.
+
+### Is there common support?
+
+@fig-common-support-HISP presents
+
+```{r}
+#| label: fig-common-support-HISP
+#| fig-cap: "Matching for HISP: Common Support [Figure 8.3 in Gertler et al. (2016)]"
+
+# add propensity scores from model to dataframe
+HISP_wide <- HISP_wide %>%
+  mutate(ps_ur = psm_ur$model$fitted.values)
+
+# plot
+HISP_wide %>%
+  mutate(enrolled_lab = ifelse(enrolled == 1, "Enrolled", "Not Enrolled")) %>%
+  ggplot(aes(x = ps_ur,
+             group = enrolled_lab,
+             colour = enrolled_lab,
+             fill = enrolled_lab)) +
+  geom_density(alpha = I(0.2)) +
+  xlab("Propensity Score") +
+  ylab("Density") +
+  scale_fill_viridis_d("Status:", end = 0.7) +
+  scale_colour_viridis_d("Status:", end = 0.7) +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank()
+        ) 
+
+```
+
+### Does matching by propensity score improve balance?
+
+```{r}
+# according to package documentation to test this we
+# 1. constructing a pre-match matchit object
+
+m.out0 <- matchit(enrolled ~ age_hh_0 + educ_hh_0 + age_sp_0 + educ_sp_0 +
+                    female_hh_0 + indigenous_0 + hhsize_0 + dirtfloor_0 +
+                    bathroom_0 + land_0 + hospital_distance_0,
+                  
+                  data = HISP_wide %>%
+                    dplyr::select(-hospital_0, -hospital_1),
+                  method = NULL,
+                  distance = "glm", link = "probit")
+
+# 2. summarize this object
+
+summary(m.out0) 
+
+
+```
+
+From the \[MatchIt documentation\](<https://cran.r-project.org/web/packages/MatchIt/vignettes/MatchIt.html>), we have good balance if standardized mean differences and eCDF statistics are close to zero, and variance ratios ar close to one
+
+### Did matching by propensity score improve balance?
+
+Before matching
+
+```{r}
+kable(summary(psm_ur)$sum.all,
+      caption = "Balance Before Matching") %>%
+  kable_styling()
+
+```
+
+After matching
+
+```{r}
+kable(summary(psm_ur)$sum.matched,
+      caption = "Balance After Matching") %>%
+  kable_styling()
+
+```
+
+We can also plot the improvements in balance achieved by matching as in Figure xx.
+
+```{r}
+plot(summary(psm_ur))
+```
+
+### What is the estimated effect of the program, using the matched sample?
+
+Here my answers do not match those in the solutions
+
+Textbook Table 8.3: full set, -9.95; limited set -11.35 (linear regression)
+
+Liam:
+
+full set, intercept 19.73 and enrolled of -11.89 (I do not match)
+
+limited set intercept 17.84 and enrolled -10.00 (I match)
+
+```{r}
+
+# first extract matched data set
+HISP_match_df_r <- match.data(psm_r)
+HISP_match_df_ur <- match.data(psm_ur)
+
+# next, estimate program effect using (weighted) linear regression
+# as all weights here equal 1, no need to use weights 
+# (one-to-one matching without replacement)
+
+out_lm_r <- lm_robust(health_expenditures_1 ~ enrolled,
+                      data = HISP_match_df_r, clusters = locality_identifier,
+                      weights = weights)
+out_lm_ur <- lm_robust(health_expenditures_1 ~ enrolled,
+                      data = HISP_match_df_ur, clusters = locality_identifier,
+                      weights = weights)
+
+# finally, summarize results of regression models
+
+sjPlot::tab_model(out_lm_r, out_lm_ur,
+                  dv.labels = c("Limited set of explanatory variables", 
+                                "Full set of explanatory variables"),
+                  digits = 3)
+
+```
+
+### What is the estimated effect of the program, using difference-in-differences regression combined with matching?
+
+```{r}
+# first, merge matched data and original data, removing unmatched observations
+
+# limited set of explanatory variables
+HISP_long_match_r <-  HISP %>%
+  left_join(HISP_match_df_r %>% dplyr::select(household_identifier, weights)) %>%
+  filter(!is.na(weights))
+
+# full set of explanatory variables
+HISP_long_match_ur <-  HISP %>%
+  left_join(HISP_match_df_ur %>% dplyr::select(household_identifier, weights)) %>%
+  filter(!is.na(weights))
+
+# next, conduct difference_in-differences regressions
+
+did_reg_r <- lm_robust(health_expenditures ~ enrolled * round,
+                       data = HISP_long_match_r, weights = weights,
+                       clusters = locality_identifier)
+
+did_reg_ur <- lm_robust(health_expenditures ~ enrolled * round,
+                        data = HISP_long_match_ur, weights = weights,
+                        clusters = locality_identifier)
+
+# finally, summarize results of regression models
+
+sjPlot::tab_model(did_reg_r, did_reg_ur,
+                  dv.labels = c("Limited set of explanatory variables", 
+                                "Full set of explanatory variables"),
+                  digits = 3)
+
+```
+
+## Matching approaches for analysis of impact of mosquito nets on risk of malaria
+
+This exercise uses a simulated dataset created by Andrew Heiss, into which he has built a true average treatment effect (ATE) of -10. In other words, we should be concluding from our analysis that using a mosquito net *causes* the risk of malaria to decrease by a average 10 percentage points.
+
+Here, I walk through step-by-step analyses included in his tutorial to cement my own understanding of the material.
+
+First, download the data from Andrew's tutorial, [Matching and inverse probability weighting](https://evalsp24.classes.andrewheiss.com/example/matching-ipw.html). I saved this in a subfolder named "heiss" in the "data" folder.
+
+### Introducing the simulated dataset used in these analyses
+
+```{r}
+nets <- read_csv(here("data", "heiss", "mosquito_nets.csv"))
+
+sjPlot::view_df(nets, show.type = TRUE, show.frq = TRUE, show.prc = TRUE)
+
+```
+
+### Calculate naive causal estimate
+
+Andrew begins by calculating the association between mosquito net usage and average malaria risk. On average, mosquito net usage is associated with a 16.3 point reduction in the risk of an individual in the household contracting malaria. But this analysis does not take into account potential differences in income, temperature and health that may also be associated with the use of mosquito nets.
+
+```{r example-wrong-model}
+
+model_wrong <- lm(malaria_risk ~ net, data = nets)
+
+tab_model(model_wrong,
+          show.se = TRUE)
+```
+
+### Matching
+
+#### Step 1 - Preprocessing
+
+Matching techniques pair up observations with similar values in confounding variables (income, temperature and health), assuming that within observations with similar values on these variables, the choice of whether or not to use the net was random. Here we use \`matchit()' to match observations based on Mahalanobis distance. We create a new trimmed dataset for subsequent analyses, which trims data to only observations for which matches were available.
+
+```{r matching}
+
+nets_matched_data <- matchit(net ~ income + temperature + health,
+                             data = nets,
+                             method = "nearest",
+                             distance = "mahalanobis",
+                             replace = TRUE) # one-to-many possibilities 
+
+nets_matched_data_trimmed <- match.data(nets_matched_data)
+
+
+```
+
+#### Step 2 - Estimating
+
+Running a regression model on the trimmed and matched dataset allows us to estimate the impact of mosquito net usage on malaria risk, using only the matched dataset. We can look at diagnostics to see how successful our matching has been, and/or we can use weights calculated by \`matchit()' to scale back the overcounting of observations that have been matched multiple times.
+
+```{r matching-models}
+model_matched <- lm(malaria_risk ~ net,
+                    data = nets_matched_data_trimmed)
+
+model_matched_weights <- lm(malaria_risk ~ net,
+                    data = nets_matched_data_trimmed,
+                    weights = weights)
+
+tab_model(model_matched, model_matched_weights,
+          dv.labels = c("Matched data", 
+                        "Matched data and weights"))
+```
+
+### Inverse probability weighting
+
+An alternative approach to matching is to calculate the probability of receiving treatment for each observation, and then weight each observation by the inverse of this probability. This means that observations that received treatment despite having a low probability of treatment, and observations that did not receive treatment despite having a high probability of treatment, will be given more weight in estimating the effect. The advantage here is that we are not throwing away unmatched observations.
+
+### Generate propensity scores
+
+First, we calculate propensity scores (here using a logistic regression), predicting use of mosquito nets based on income, temperatures and health. We then use augment_columns to add the predicted values to our dataset. and calculate the inverse of these scores as in the formula below.
+
+```{r calculate-p-scores}
+
+model_net <- glm(net ~ income + temperature + health,
+                 data = nets,
+                 family = binomial(link = "logit"))
+
+tab_model(model_net)
+
+nets_ipw <- broom::augment_columns(model_net,
+                                   nets,
+                                   
+                                   # to use probability score from 0-1
+                                   type.predict = "response") %>% 
+  rename(propensity = .fitted) %>%
+  mutate(ipw = (net_num / propensity) + ((1 - net_num) / (1 - propensity)))
+
+# augment will throw away columns not used in model
+# augment_columns adds to columns already in database
+# .fitted is predicted probability
+# ipw can be understood as 'weirdness score'
+
+```
+
+### Find effect
+
+Next, we estimate the effect of the treatment as usual (here using a linear regression), applying the inverse propensity weights as weights.
+
+```{r ipw-model}
+
+model_ipw <- lm(malaria_risk ~ net,
+                data = nets_ipw,
+                weights = ipw)
+
+tab_model(model_ipw)
+
+```
+
+### Comparing models
+
+Finally, we compare the estimated effect of all models explored in this tutorial.
+
+```{r all-models-together}
+sjPlot::tab_model(model_wrong,
+          model_matched,
+          model_matched_weights,
+          model_ipw)
+
+modelsummary::modelsummary(list("Naive" = model_wrong,
+                  "Matched" = model_matched,
+                  "Matched with weights" = model_matched_weights,
+                  "Inverse probability weights" = model_ipw))
+
+
+```
+
+### Standard errors
+
+Oh no, our standard errors for the average treatment effect calculated using inverse propensity weights is incorrect, and we need to use bootstrapping.
+
+# Other examples
+
+-   Controlling for the schools where students apply and are accepted found that, all other things being equal, private school graduates did not earn more than public school graduates: Stacy Dale and Alan Krueger [@marginal_revolution_university_selection_2019]
+
+-   Measuring the effect of 'tight' and 'easy' monetary policies in response to the collapse of Caldwell & Company in the South in 1930 (different Federal reserve districts)
+
+# Glossary
+
+Ceteris Paribus - "all other things being equal" (perfectly balanced comparison) [@marginal_revolution_university_ceteris_2019; @marginal_revolution_university_selection_2019]
+
+Selection bias - "Any comparison plagued by systematic differences between groups other than the differences we're focused on" [@marginal_revolution_university_selection_2019]
+
+Omitted variables bias (OVB) - selection bias in a regression context [@marginal_revolution_university_selection_2019]
+
+# Resources
+
+## Textbooks
+
+[Causal inference in R](https://www.r-causal.org/) - by Malcolm Barrett, Lucy D'Agostino McGowan, and Travis Gerke (14 March, 2024), from https://r-causal.github.io/r-causal-blog/about.html
+
+[Causal inference: What if?](https://www.hsph.harvard.edu/miguel-hernan/wp-content/uploads/sites/1268/2024/01/hernanrobins_WhatIf_2jan24.pdf) - by Miguel Hernán and Jamie Robins \[pdf, epidemiology focus\]
+
+[Causal inference: The Mixtape](https://mixtape.scunning.com/) - by Scott Cunningham \[econometrics\]
+
+[The Effect](https://theeffectbook.net/) - by Nick Huntington-Klein \[econometrics\]
+
+[Impact evaluation in practice](https://www.worldbank.org/en/programs/sief-trust-fund/publication/impact-evaluation-in-practice) - by Paul Gertler et al, World Bank Group, 2016
+
+Methods Matter - by Richard Murnane and John Willett, 2010
+
+Mastering Econometrics
+
+## Code samples
+
+[Impact evaluation in practice: Solutions for second edition in R](https://lfbeisermcgrath.github.io/rimpactevaluation/)
+
+[R and stata code for exercises from Causal inference: What if?](https://remlapmot.github.io/cibookex-r/)
+
+[Causal inference in education](https://bookdown.org/aschmi11/causal_inf/) - by Anthony Schmidt
+
+-   R code associated with exercises from
+
+    -   Methods Matter
+
+    -   Mostly Harmless
+
+    -   Impact Evaluation in Practice
+
+## Journal articles
+
+[https://mpra.ub.uni-muenchen.de/76295/3/MPRA_paper_76295.pdf](Causal%20inference%20on%20education%20policies:%20A%20survey%20of%20empirical%20studies%20using%20PISA,%20TIMSS%20and%20PIRLS) - by Cordero et al, 2017
+
+## Blog posts
+
+[Causal design patterns for data analysts](https://emilyriederer.netlify.app/post/causal-design-patterns/)
+
+Good overview of when you would use different techniques, and what they try to do (industry perspective)
+
+## Course materials
+
+[Program evaluation for public service](https://evalsp24.classes.andrewheiss.com/) (Andrew Heiss, Georgia State University, Spring 2024)
+
+-   [Spring 2023](https://evalsp23.classes.andrewheiss.com/)
+-   [Fall 2002](https://evalf22.classes.andrewheiss.com/)
+
+[Mastering 'Metrics](https://www.masteringmetrics.com/online-metrics-resources/)
+
+[Mastering econometrics with Joshua Angrist](https://www.youtube.com/playlist?list=PL-uRhZ_p-BM5ovNRg-G6hDib27OCvcyW8) \[youtube\]
+
+-   [Ceteris Paribus: Public vs. Private University](https://www.youtube.com/watch?v=iPBV3BlV7jk)
+-   [Selection bias: Will you make more going to a private university](https://www.youtube.com/watch?v=6YrIDhaUQOE)
+-   [Introduction to differences-in-differences](https://www.youtube.com/watch?v=eiffOVbYvNc&list=PL-uRhZ_p-BM5ovNRg-G6hDib27OCvcyW8&index=7)
+
+[Health Services Research Methods I](https://clas.ucdenver.edu/marcelo-perraillon/sites/default/files/attached-files/week_3_causal_0.pdf) (Marcelo Coca Perraillon, University of Colorado Denver)
 
 <https://clas.ucdenver.edu/marcelo-perraillon/sites/default/files/attached-files/w2_causal_inference_perraillon.pdf>
 
 <https://clas.ucdenver.edu/marcelo-perraillon/sites/default/files/attached-files/week_3_causal_0.pdf>
+
+[Causal Inference in R Workshop](https://github.com/r-causal/causal_inference_r_workshop)
+
+[Why propensity scores should not be used for matching](https://www.youtube.com/watch?v=rBv39pK1iEs) - Gary King \[youtube\]
+
+[Matching methods](https://www.youtube.com/watch?v=tvMyjDi4dyg) - Gary King \[youtube\]
