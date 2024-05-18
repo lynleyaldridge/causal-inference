@@ -100,7 +100,7 @@ sjPlot::view_df(HISP, show.type = TRUE, show.frq = TRUE, show.prc = TRUE)
 # Difference-in-differences
 
 ::: callout-note
-## Resources on difference-in-differences
+## Resources
 
 For overviews and worked examples of the difference-in-differences approach, see:
 
@@ -333,7 +333,7 @@ equatiomatic::extract_eq(srvy_did, use_coefs = TRUE)
 # Matching
 
 ::: callout-note
-## Resources on matching
+## Resources
 
 For overviews and worked examples of matching approaches, see:
 
